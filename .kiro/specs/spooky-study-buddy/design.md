@@ -2,15 +2,18 @@
 
 ## Overview
 
-Spooky Study Buddy is a single-page productivity application built with Next.js 14+ (App Router), TypeScript, and Tailwind CSS. Its purpose is to keep students focused during study sessions by coupling a Pomodoro-style timer with escalating Halloween-horror consequences for procrastination.
+Spooky Study Buddy is a single-page productivity application built with Next.js 14 (App Router), TypeScript, and Tailwind CSS. Its purpose is to keep students focused during study sessions by coupling a Pomodoro-style timer with escalating Halloween-horror consequences for procrastination.
 
-The application runs entirely in the browser. There is no server-side user state; all session data persists in `localStorage`. The only server-side code is the `/api/ghost-roast` Next.js route handler, which calls an AI provider to generate spooky taunts. When no API key is configured, the route is bypassed in favour of a locally bundled fallback set.
+The application runs entirely in the browser. There is no server-side user state; all session data persists in `localStorage`. The only server-side code is the `/api/ghost-roast` Next.js route handler, which calls the Anthropic Claude API (`@anthropic-ai/sdk`, model `claude-opus-5-5`) to generate spooky taunts. When no `ANTHROPIC_API_KEY` is configured, the route returns a line from a locally bundled fallback set.
 
 ### Key design principles
 
-- **Client-first**: every interactive subsystem (timer, detection, audio, notifications) lives in `'use client'` components or plain TypeScript modules imported by them. Server Components render only the static shell and the API route.
-- **Single source of truth**: all mutable session state lives in one React context (`SessionContext`). Subsystems read from and dispatch actions to that context. `localStorage` is kept as a mirror, written within 500 ms of any state change.
-- **Graceful degradation**: the Audio Engine, Notification Service, and AI route each have defined fallback paths so a capability gap in the browser never crashes the app.
+- **Client-first**: every interactive subsystem (timer, detection, audio, notifications) lives in `'use client'` components or plain TypeScript modules imported by them. Server Components render only the static shell; the API route is the only server logic.
+- **Single source of truth**: all mutable session state lives in one React context (`SessionContext`). Subsystems read from and dispatch actions to that context. `localStorage` is a mirror, written within 500 ms of any state change.
+- **Wall-clock time, not tick counts**: browsers throttle timers in hidden tabs (Chrome may run them only once a minute after ~5 min hidden). The timer stores an `endsAt` timestamp and derives `remainingSeconds` from `Date.now()`, so throttling never causes drift and a refresh restores time exactly.
+- **Design for the hidden tab**: during a tab-switch slack the user cannot see the page. The channels that reach them are the tab title, the favicon, audio, and desktop notifications, so those are treated as primary; on-page effects (tint, glitch, speech bubble) matter mainly for idle slacks and on return.
+- **User-gesture gating**: audio and notification permission are both initialised inside the Start-button click handler, because browsers block autoplay and suppress permission prompts that lack a user gesture.
+- **Graceful degradation**: the Audio Engine, Notification Service, and AI route each have defined fallback paths so a capability gap never crashes the app.
 - **Accessibility by default**: reduced-motion, keyboard navigation, and colour-contrast requirements are addressed at the component level, not retrofitted.
 
 ---
@@ -22,74 +25,76 @@ The application runs entirely in the browser. There is no server-side user state
 ```
 app/
 ├── layout.tsx                  (Server Component — HTML shell, fonts, global CSS)
-└── page.tsx                    (Server Component — renders <StudyBuddyApp />)
+├── page.tsx                    (Server Component — renders <SessionProvider><StudyBuddyApp/></SessionProvider>)
+├── globals.css                 (Tailwind layers + haunt/ghost keyframes + reduced-motion rules)
+└── api/ghost-roast/route.ts    (POST handler — validates body, rate-limits, calls Claude, returns roast)
 
 components/
-├── StudyBuddyApp.tsx           ('use client' — root client boundary, composes all UI panels)
+├── StudyBuddyApp.tsx           ('use client' — root client boundary, composes panels, owns side-effect hooks)
 ├── timer/
-│   ├── TimerDisplay.tsx        (MM:SS readout, start/pause/reset controls)
-│   └── DurationPicker.tsx      (1–120 min slider/input, only visible pre-session)
+│   ├── TimerDisplay.tsx        (MM:SS readout; Start / Pause / Resume / Reset / End Session controls)
+│   └── DurationPicker.tsx      (1–120 min slider + number input, only visible while stopped)
 ├── tasks/
-│   ├── TaskList.tsx            (renders TaskItem list)
-│   ├── TaskItem.tsx            (single task row: checkbox, label, delete)
+│   ├── TaskList.tsx            (ordered list of TaskItem)
+│   ├── TaskItem.tsx            (checkbox, label, delete)
 │   └── TaskInput.tsx           (new-task form with inline validation)
 ├── ghost/
-│   ├── GhostCompanion.tsx      (animation state machine, renders SVG/Lottie frames)
-│   └── RoastBubble.tsx         (speech bubble that appears over the ghost)
+│   ├── GhostCompanion.tsx      (inline SVG ghost; CSS animation class per GhostState)
+│   └── RoastBubble.tsx         (speech bubble over the ghost)
 ├── haunt/
-│   ├── HauntOverlay.tsx        (red-tint overlay + CSS glitch effect)
+│   ├── HauntOverlay.tsx        (red-tint overlay + CSS glitch, ≤ 3 Hz)
 │   └── JumpscareFlash.tsx      (brief full-screen flash on tab return)
 ├── report/
-│   └── SurvivalReport.tsx      (modal: focus time, completed tasks, haunt count, roast)
+│   └── SurvivalReport.tsx      (modal: focus time, completed tasks, slack count, roast)
 └── ui/
     ├── MuteToggle.tsx
-    └── ReduceMotionToggle.tsx   (manual override for users who want to suppress effects)
+    ├── ReduceMotionToggle.tsx  (manual override in addition to the OS preference)
+    └── Toast.tsx               (non-blocking warnings, e.g. corrupt storage)
 
 lib/
+├── types.ts                    (all shared types — see Data Models)
 ├── session/
-│   ├── SessionContext.tsx      (React context + useReducer — single state store)
+│   ├── SessionContext.tsx      (React context + useReducer; hydration gate; debounced persistence)
 │   ├── sessionReducer.ts       (pure reducer, all state transitions)
+│   ├── selectors.ts            (pure derived values: focusSeconds, completedThisSession, currentTaskName)
 │   └── localStorageSync.ts     (read/write helpers, schema validation, corruption recovery)
 ├── detection/
 │   ├── VisibilityMonitor.ts    (Page Visibility API wrapper)
-│   └── IdleDetector.ts         (mousemove/keydown inactivity tracker, 60 s threshold)
+│   └── IdleDetector.ts         (input-inactivity tracker, 60 s threshold, suspend/resume)
 ├── audio/
-│   └── AudioEngine.ts          (Web Audio API + HTML <audio> fallback, volume scheduling)
+│   ├── AudioEngine.ts          (Web Audio synthesised drone + heartbeat, gain scheduling)
+│   └── volume.ts               (pure escalation math)
 ├── notifications/
-│   └── NotificationService.ts  (Web Notifications API wrapper, one-shot permission)
+│   └── NotificationService.ts  (Web Notifications wrapper; gesture-gated permission; click-to-focus)
 ├── roast/
 │   ├── ghostRoastClient.ts     (fetch wrapper for /api/ghost-roast)
-│   └── fallbackRoasts.ts       (10+ pre-written lines)
+│   ├── fallbackRoasts.ts       (separate taunt / congratulation lists, mode-aware picker)
+│   ├── validateRoastRequest.ts (pure request validation, shared by route + tests)
+│   └── rateLimit.ts            (in-memory per-IP fixed-window limiter)
 └── utils/
     ├── formatTime.ts           (seconds → MM:SS, seconds → HH:MM:SS)
     └── tabEffects.ts           (title flashing, favicon swap)
-
-app/api/ghost-roast/
-└── route.ts                    (POST handler — validates body, calls AI provider, returns roast)
 ```
 
 ### Data flow
 
 ```
-User interaction
-      │
-      ▼
-React component (e.g. TimerDisplay)
-      │  dispatches action
-      ▼
-sessionReducer (pure function, returns new SessionState)
-      │
-      ├──► SessionContext consumers re-render
-      │
-      └──► localStorageSync (effect in SessionContext.tsx)
-                writes updated state → localStorage within 500 ms
+User interaction ──► component dispatches action (with `now: Date.now()` where time matters)
+                          │
+                          ▼
+              sessionReducer (pure; no Date.now() inside)
+                          │
+            ┌─────────────┴──────────────┐
+            ▼                            ▼
+  context consumers re-render    debounced (300 ms) localStorageSync.write
 
-Side-effect subsystems (run as useEffect inside StudyBuddyApp):
-  VisibilityMonitor ──► dispatch SLACK_START / SLACK_END
-  IdleDetector      ──► dispatch SLACK_START / SLACK_END
-  AudioEngine       ──► reacts to session.hauntMode, session.muted
-  NotificationService ► reacts to session.hauntMode
-  tabEffects        ──► reacts to session.hauntMode (title flash, favicon)
+Side-effect hooks in StudyBuddyApp (all gated on timerStatus === 'running'):
+  VisibilityMonitor ──► SLACK_START{source:'visibility'} / SLACK_END ; suspends IdleDetector while hidden
+  IdleDetector      ──► SLACK_START{source:'idle'} / SLACK_END
+  1 s ticker        ──► TICK{now}  (reducer derives remaining from endsAt; FINISH when ≤ 0)
+  hauntMode effect  ──► AudioEngine.start/stop, tabEffects, NotificationService.notify(taunt)
+  10 s slack timer  ──► fetchRoast ► SET_ROAST ► (if hidden) notify(roast, same tag)
+  sessionEnded      ──► fetchRoast{mode:'congratulate'} ► SET_ROAST
 ```
 
 ---
@@ -98,211 +103,215 @@ Side-effect subsystems (run as useEffect inside StudyBuddyApp):
 
 ### SessionContext
 
-The single state store. Provides `state: SessionState` and `dispatch: Dispatch<SessionAction>` to all client components via React context. Internally uses `useReducer(sessionReducer, initialState)`. An effect watches `state` and calls `localStorageSync.write(state)` with a 500 ms debounce.
+Provides `state`, `dispatch`, `hydrated: boolean`, and `storageWarning: string | null`.
 
-### TimerDisplay
+- Initial render (server and first client render) uses `initialState` and `hydrated = false`; `StudyBuddyApp` renders a placeholder until hydrated, so server and client markup match.
+- A mount effect calls `localStorageSync.read()`. `{ status: 'ok', data }` → dispatch `RESTORE_STATE`; `{ status: 'corrupt' }` → set `storageWarning`; `{ status: 'empty' }` → nothing. Then `hydrated = true`.
+- After hydration, an effect writes `state` with a 300 ms debounce (meets the 500 ms requirement). A `beforeunload` / `pagehide` listener flushes the pending write immediately.
 
-Props: none (reads from `SessionContext`).
+### Timer (TimerDisplay + ticker hook)
 
-Responsibilities:
-- Render remaining time in MM:SS via `formatTime`.
-- Expose Start, Pause, Resume, and Reset buttons; each dispatches the corresponding action.
-- Run the countdown via `setInterval` inside a `useEffect` that fires `TICK` actions every 1 000 ms. The interval is cleared when the timer is not running.
-- Detect timer-drift on tab-visibility restore by comparing `Date.now()` with the last-tick timestamp stored in state.
+- `START_TIMER{now}` sets `endsAt = now + remainingSeconds*1000`, `timerStatus = 'running'`, and `sessionStartedAt = now` if not set.
+- `TICK{now}` sets `remainingSeconds = max(0, ceil((endsAt - now)/1000))`. When it reaches 0 the reducer applies the same transition as `FINISH_SESSION`.
+- `PAUSE_TIMER{now}` freezes `remainingSeconds` from `endsAt` and clears `endsAt`. `RESUME_TIMER{now}` recomputes `endsAt` from the frozen value.
+- `RESET_TIMER` restores `remainingSeconds = durationSeconds`, `timerStatus = 'stopped'`, `endsAt = null` (tasks untouched).
+- `FINISH_SESSION{now}` (End Session button or timer zero) freezes the timer, ends any active slack (adding its duration), sets `sessionEnded = true`, `sessionEndedAt = now`, `ghostState = 'celebratory'`.
+- A ticker `useEffect` dispatches `TICK{Date.now()}` every 1 000 ms while running, and once immediately on `visibilitychange` to visible. Because the reducer uses wall-clock time, throttled or missed ticks never cause drift.
+- The Start handler also calls `audioEngine.unlock()` and `notificationService.requestPermissionIfNeeded()` (user-gesture requirement).
 
 ### GhostCompanion
 
-Props: none (reads `session.ghostState` from `SessionContext`).
+Inline SVG ghost (no Lottie). `ghostState` maps to a CSS class: `ghost-idle` (slow float), `ghost-calm` (gentle bob with a book), `ghost-haunting` (shake, red eyes), `ghost-jumpscare` (scale-up lunge), `ghost-celebratory` (bounce). Under reduced motion (OS preference or manual toggle), all animation is disabled via CSS and `jumpscare` renders as `haunting`. The container has `role="img"` and an `aria-label` that describes the current state.
 
-Responsibilities:
-- Map `GhostState` enum values to Lottie/CSS animation classes.
-- Honour `prefers-reduced-motion`: when the OS preference is `reduce`, substitute static images for all animations and skip the jumpscare.
-- Render an `aria-label` on the container for screen readers.
+Ghost state is derived, with one transient override:
 
-### HauntOverlay
+```
+sessionEnded            → 'celebratory'
+hauntMode               → 'haunting'
+jumpscareUntil > now    → 'jumpscare'   (set on SLACK_END, 1 200 ms; skipped under reduced motion)
+timerStatus==='running' → 'calm'
+otherwise               → 'idle'
+```
 
-Renders a fixed, full-viewport `<div>` with `pointer-events: none`. When `session.hauntMode` is `true` it adds the `haunt-active` Tailwind class which applies the red-tint overlay and CSS glitch keyframes. The glitch animation is capped at 3 flashes per second to meet WCAG 2.3.1.
+### HauntOverlay and JumpscareFlash
+
+`HauntOverlay` is a fixed full-viewport `<div aria-hidden pointer-events-none>`. While `hauntMode` is on it shows a 25% red tint and the `haunt-glitch` animation. The keyframes run at 0.5 s per cycle (2 Hz), under the 3 Hz WCAG 2.3.1 limit. `JumpscareFlash` shows a 600 ms dark-red radial flash with the ghost face when the jumpscare state begins, and is not rendered under reduced motion.
 
 ### SurvivalReport
 
-Rendered as a `<dialog>` element (native modal). Receives no props; reads all data from `SessionContext`. Displays:
-- Total focus duration (HH:MM:SS).
-- List of completed tasks.
-- Total `Slacking_Off_Event` count.
-- AI roast or fallback message.
+A native `<dialog>` opened with `showModal()` when `sessionEnded` is true. It reads `focusSeconds`, `completedThisSession`, `slackingOffCount`, and `currentRoast` (falling back to `getFallback('congratulate')` while the AI call is pending or failed). The dismiss button and `Escape` (`cancel` event) dispatch `DISMISS_REPORT`.
 
-On dismiss, dispatches `END_SESSION` which clears state and resets the timer.
+`DISMISS_REPORT` resets the timer to `durationSeconds`, zeroes `slackingOffCount` / `totalSlackSeconds`, clears `sessionStartedAt` / `sessionEndedAt` / `currentRoast` / `sessionEnded`, removes completed tasks, and keeps incomplete ones.
 
 ### AudioEngine (lib/audio/AudioEngine.ts)
 
-A plain TypeScript class (not a React component) instantiated once and held in a `useRef` inside `StudyBuddyApp`.
+A plain TypeScript class held in a `useRef`. Sound is synthesised, so there are no asset files or licensing concerns.
 
 ```typescript
 class AudioEngine {
-  private ctx: AudioContext | null
-  private gainNode: GainNode | null
-  private source: AudioBufferSourceNode | MediaElementAudioSourceNode | null
-  private volumeStepInterval: ReturnType<typeof setInterval> | null
-  private muted: boolean
-
-  start(): void          // begins ambient track at gain 0.1, starts escalation timer
-  stop(): void           // cancels escalation, fades gain to 0 over 2 s, then stops source
-  setMuted(m: boolean): void
-  private escalate(): void  // adds 0.1 to gain every 30 s, caps at 1.0
-  private fadeOut(): void   // gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 2)
+  unlock(): void            // create AudioContext (or resume) — call from a click handler
+  start(): void             // build drone (2 detuned low oscillators + LFO tremolo) and heartbeat
+                            // (scheduled "lub-dub" sine thumps); gain at 0.1; start 30 s escalation
+  stop(): void              // clear escalation; ramp master gain to 0 over 2 s; stop nodes after ramp
+  setMuted(m: boolean): void // master gain → 0 when muted; restore current level when unmuted
+  get supported(): boolean
 }
 ```
 
-The constructor attempts `new AudioContext()`. On failure (old browser) it falls back to `new Audio(src)` controlled via the `volume` property and plain `setTimeout` escalation.
+The escalation maths lives in `volume.ts` as `nextVolume(v) = min(1, round1(v + 0.1))`, so it can be tested without audio. If `AudioContext` is unavailable, `supported` is false, every method is a no-op, and `MuteToggle` shows "Audio unavailable".
 
 ### NotificationService (lib/notifications/NotificationService.ts)
 
 ```typescript
 class NotificationService {
-  private permissionState: NotificationPermission | 'unsupported'
-
-  async requestPermission(): Promise<void>
-  notify(title: string, body: string): void
-  isDenied(): boolean
+  get permission(): NotificationPermission | 'unsupported'   // reads Notification.permission live
+  async requestPermissionIfNeeded(): Promise<void>           // only when permission === 'default'; at most once per page load
+  notify(body: string, tag?: string): void                   // title fixed to "👻 Your Ghost Buddy is watching…"
 }
 ```
 
-`requestPermission` is called once on `App` mount. The result is cached in `localStorage` under `ssb_notification_permission` so the app does not prompt again in the same browser session if the user denied.
+`notify` creates the notification with `{ body, tag, renotify: true, icon: '/favicon-haunted.svg' }` and sets `onclick = () => { window.focus(); n.close(); }`. Each slack event uses tag `ssb-slack-<startedAt>`, so the AI roast notification replaces the immediate taunt. There is no `localStorage` cache, because `Notification.permission` is the source of truth.
 
 ### VisibilityMonitor and IdleDetector (lib/detection/)
 
-Both are plain TypeScript classes with `start()`, `stop()` methods. They receive callbacks rather than accessing context directly, keeping them pure and testable.
-
 ```typescript
 class VisibilityMonitor {
-  constructor(
-    private onHidden: () => void,
-    private onVisible: () => void
-  ) {}
-  start(): void   // addEventListener('visibilitychange', ...)
-  stop(): void    // removeEventListener
+  constructor(onHidden: () => void, onVisible: () => void)
+  start(): void; stop(): void
 }
 
 class IdleDetector {
-  constructor(
-    private idleThresholdMs: number,  // 60 000
-    private onIdle: () => void,
-    private onActive: () => void
-  ) {}
-  start(): void   // attaches mousemove/keydown listeners, sets 60 s timeout
-  stop(): void    // removes listeners, clears timeout
-  private reset(): void  // called on each input event
+  constructor(thresholdMs: number, onIdle: () => void, onActive: () => void)
+  start(): void            // listens to mousemove, mousedown, keydown, wheel, touchstart, scroll (passive)
+  stop(): void
+  suspend(): void          // clears the timer (used while tab hidden)
+  resume(): void           // restarts the countdown from now
 }
 ```
+
+Both are mounted only while `timerStatus === 'running'`. Input events are throttled to one reset per 250 ms.
+
+### Ghost Roast route (app/api/ghost-roast/route.ts)
+
+1. Get the client IP from the `x-forwarded-for` header (first entry), falling back to `'local'`. Call `rateLimit(ip)` (10 requests per 60 s window) and return `429 { error }` if over the limit.
+2. Parse JSON (`400` if it isn't JSON). Run `validateRoastRequest(body)`; return `400 { error }` on failure.
+3. If `process.env.ANTHROPIC_API_KEY` is unset, return `200 { message: getFallback(mode), source: 'fallback' }`.
+4. Otherwise call Claude:
+   - `client.beta.messages.create({ model: 'claude-opus-5-5', max_tokens: 2000, output_config: { effort: 'low' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', system, messages })`, where `system` holds the ghost persona and output rules (one or two sentences, under 40 words, no slurs, no self-harm references, playful not cruel).
+   - The task name goes in the user message inside `<task>` tags, and the prompt tells the model to treat it as data, not instructions.
+   - Read the first `text` block. On `stop_reason === 'refusal'`, an empty text block, or any SDK error, return the fallback.
+   - The client is created with `timeout: 8000` and `maxRetries: 1`, so a roast arrives well before the user returns.
 
 ---
 
 ## Data Models
 
-### SessionState
-
 ```typescript
-type TimerStatus = 'stopped' | 'running' | 'paused';
+// lib/types.ts
+export type TimerStatus = 'stopped' | 'running' | 'paused';
+export type GhostState = 'idle' | 'calm' | 'haunting' | 'jumpscare' | 'celebratory';
+export type SlackSource = 'visibility' | 'idle';
+export type RoastMode = 'roast' | 'congratulate';
 
-type GhostState = 'idle' | 'calm' | 'haunting' | 'jumpscare' | 'celebratory';
-
-interface Task {
-  id: string;           // uuid v4
-  name: string;
+export interface Task {
+  id: string;                  // crypto.randomUUID()
+  name: string;                // trimmed, 1–200 chars
   completed: boolean;
-  createdAt: number;    // Date.now()
+  createdAt: number;
+  completedAt: number | null;  // set on completion, cleared on un-completion
 }
 
-interface SessionState {
+export interface SessionState {
   // Timer
-  durationSeconds: number;         // user-specified total, 60–7200
-  remainingSeconds: number;
+  durationSeconds: number;      // 60–7200
+  remainingSeconds: number;     // authoritative while paused/stopped; derived from endsAt while running
   timerStatus: TimerStatus;
-  lastTickAt: number | null;       // Date.now() at last TICK, for drift correction
+  endsAt: number | null;        // epoch ms, non-null only while running
+  sessionStartedAt: number | null;
+  sessionEndedAt: number | null;
+  sessionEnded: boolean;
 
   // Tasks
   tasks: Task[];
 
-  // Haunt
+  // Slacking
   hauntMode: boolean;
+  slackSource: SlackSource | null;
+  slackStartedAt: number | null;
   slackingOffCount: number;
-  slackStartedAt: number | null;   // Date.now() when current slack started
+  totalSlackSeconds: number;
 
-  // Ghost
-  ghostState: GhostState;
-
-  // Audio
-  muted: boolean;
-
-  // Roast
+  // Ghost / UI
+  jumpscareUntil: number | null;
   currentRoast: string | null;
-
-  // Session lifecycle
-  sessionEnded: boolean;
+  muted: boolean;
 }
+
+export type SessionAction =
+  | { type: 'SET_DURATION'; minutes: number }
+  | { type: 'START_TIMER'; now: number }
+  | { type: 'PAUSE_TIMER'; now: number }
+  | { type: 'RESUME_TIMER'; now: number }
+  | { type: 'RESET_TIMER' }
+  | { type: 'TICK'; now: number }
+  | { type: 'FINISH_SESSION'; now: number }
+  | { type: 'DISMISS_REPORT' }
+  | { type: 'ADD_TASK'; id: string; name: string; now: number }
+  | { type: 'TOGGLE_TASK'; id: string; now: number }
+  | { type: 'DELETE_TASK'; id: string }
+  | { type: 'SLACK_START'; source: SlackSource; now: number }
+  | { type: 'SLACK_END'; now: number; jumpscare: boolean }
+  | { type: 'CLEAR_JUMPSCARE' }
+  | { type: 'SET_ROAST'; message: string | null }
+  | { type: 'SET_MUTED'; muted: boolean }
+  | { type: 'RESTORE_STATE'; persisted: PersistedSessionState; now: number };
 ```
+
+Key reducer rules:
+
+- `SLACK_START` is ignored unless `timerStatus === 'running'` and `hauntMode === false`. Otherwise it sets `hauntMode`, `slackSource`, `slackStartedAt`, **increments `slackingOffCount`**, and clears `currentRoast`.
+- `SLACK_END` is ignored unless `hauntMode`. Otherwise it adds `round((now - slackStartedAt)/1000)` to `totalSlackSeconds`, clears the slack fields, and sets `jumpscareUntil = now + 1200` if `jumpscare` is true.
+- `ADD_TASK` trims the name and ignores empty or whitespace names; names over 200 characters are truncated.
+- `RESTORE_STATE` re-derives `remainingSeconds` from `endsAt` (if running and the time has passed, the session finishes). It always sets `hauntMode = false`, because a reload means the user is back.
+
+Derived selectors (`lib/session/selectors.ts`):
+
+- `elapsedSeconds = durationSeconds - remainingSeconds`
+- `focusSeconds = max(0, elapsedSeconds - totalSlackSeconds)`
+- `completedThisSession = tasks.filter(t => t.completed && t.completedAt >= (sessionStartedAt ?? 0))`
+- `currentTaskName = first incomplete task name ?? 'your studies'`
 
 ### LocalStorage schema
 
-All data is stored under a single key `ssb_session` as a JSON string:
+Single key `ssb_session`, version 2:
 
 ```typescript
-interface PersistedSessionState {
-  version: 1;
+export interface PersistedSessionState {
+  version: 2;
   durationSeconds: number;
   remainingSeconds: number;
   timerStatus: TimerStatus;
-  lastTickAt: number | null;
+  endsAt: number | null;
+  sessionStartedAt: number | null;
+  sessionEndedAt: number | null;
+  sessionEnded: boolean;
   tasks: Task[];
   slackingOffCount: number;
+  totalSlackSeconds: number;
   muted: boolean;
 }
 ```
 
-Fields not persisted (`hauntMode`, `ghostState`, `currentRoast`, `sessionEnded`, `slackStartedAt`) are always derived fresh on load. `hauntMode` and `slackStartedAt` are reset to `false` / `null` on page load because a reload implies the user has returned to the tab.
+The following fields are not persisted: `hauntMode`, `slackSource`, `slackStartedAt`, `jumpscareUntil`, `currentRoast`. A slack that is in progress at reload is already counted (because the count goes up at start), but its duration up to that point is lost, which is an acceptable approximation.
 
-A second key `ssb_notification_permission` stores `'granted' | 'denied' | 'default'` to prevent repeat prompts.
-
-**Schema validation and corruption recovery** (`lib/session/localStorageSync.ts`):
-
-```typescript
-function read(): PersistedSessionState | null {
-  try {
-    const raw = localStorage.getItem('ssb_session');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!isValidPersistedState(parsed)) {
-      localStorage.removeItem('ssb_session');
-      return null;   // triggers clean-state init + non-blocking warning toast
-    }
-    return parsed;
-  } catch {
-    localStorage.removeItem('ssb_session');
-    return null;
-  }
-}
-```
-
-`isValidPersistedState` checks that `version === 1`, numeric fields are finite numbers within range, `timerStatus` is one of the three enum values, and `tasks` is an array of objects with the correct shape.
+`localStorageSync.read()` returns `{ status: 'empty' } | { status: 'ok', data } | { status: 'corrupt' }`. It returns `corrupt`, and removes the key, when JSON parsing fails or `isValidPersistedState` rejects the data. That check confirms `version === 2`, the numeric fields are finite and in range, `timerStatus` is one of the enum values, `endsAt` is non-null exactly when running, and every task has the correct shape. Version 1 data is treated as corrupt, so the user sees the warning once.
 
 ### Ghost Roast API request/response
 
 ```typescript
-// POST /api/ghost-roast
-interface GhostRoastRequest {
-  taskName: string;         // non-empty string
-  slackingDuration: number; // non-negative number, seconds
-  mode: 'roast' | 'congratulate';
-}
-
-interface GhostRoastResponse {
-  message: string;
-}
-
-// Error response (HTTP 400)
-interface GhostRoastError {
-  error: string;
-}
+export interface GhostRoastRequest { taskName: string; slackingDuration: number; mode: RoastMode }
+export interface GhostRoastResponse { message: string; source: 'ai' | 'fallback' }
+export interface GhostRoastError { error: string }   // HTTP 400 or 429
 ```
 
 ---
@@ -311,83 +320,95 @@ interface GhostRoastError {
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-### Property 1: Timer countdown preserves remaining time
+### Property 1: Timer remaining time follows wall-clock time
 
-*For any* valid initial duration (60–7200 s) and any number of TICK actions applied while the timer is running, the resulting `remainingSeconds` SHALL equal `durationSeconds` minus the number of ticks applied, clamped to zero.
+*For any* duration D (60–7200 s), start time t0, and later time t ≥ t0, applying `START_TIMER{t0}` then `TICK{t}` SHALL yield `remainingSeconds = max(0, ceil(D - (t - t0)/1000))`, regardless of how many intermediate ticks were applied.
 
-**Validates: Requirements 1.2, 1.3**
+**Validates: Requirements 1.2, 1.3, 1.4**
 
 ### Property 2: Pause then resume is a time-preserving round trip
 
-*For any* running timer state with `remainingSeconds > 0`, applying PAUSE then RESUME SHALL leave `remainingSeconds` unchanged.
+*For any* running state and any times t1 ≤ t2, applying `PAUSE_TIMER{t1}` then `RESUME_TIMER{t2}` SHALL leave `remainingSeconds` equal to its value at t1, and `endsAt` SHALL equal `t2 + remainingSeconds*1000`.
 
 **Validates: Requirements 1.5, 1.6**
 
 ### Property 3: Reset returns timer to initial duration
 
-*For any* timer state (running, paused, or stopped) with any `remainingSeconds`, applying RESET SHALL set `remainingSeconds` equal to `durationSeconds` and `timerStatus` to `'stopped'`.
+*For any* timer state, `RESET_TIMER` SHALL set `remainingSeconds = durationSeconds`, `timerStatus = 'stopped'`, and `endsAt = null`.
 
 **Validates: Requirements 1.7**
 
 ### Property 4: Session state persistence round trip
 
-*For any* valid `SessionState`, serialising it to the localStorage schema and then deserialising it SHALL produce a state whose timer fields, task list, `slackingOffCount`, and `muted` flag are identical to the originals.
+*For any* valid `SessionState`, `fromPersisted(toPersisted(s))` SHALL be identical to `s` on every persisted field, and `isValidPersistedState(toPersisted(s))` SHALL be true.
 
-**Validates: Requirements 9.1, 9.3**
+**Validates: Requirements 1.8, 9.1, 9.3**
 
 ### Property 5: Corrupted localStorage yields clean state
 
-*For any* string value that does not parse as a valid `PersistedSessionState`, calling `localStorageSync.read()` SHALL return `null` and SHALL remove the corrupted key from localStorage.
+*For any* stored string that is not a valid `PersistedSessionState`, `read()` SHALL return `{ status: 'corrupt' }` and remove the key.
 
 **Validates: Requirements 9.5**
 
 ### Property 6: Task addition grows the list
 
-*For any* task list and any non-empty, non-whitespace task name, dispatching ADD_TASK SHALL increase the task list length by exactly 1 and the new task's `name` SHALL equal the trimmed input.
+*For any* task list and any name containing a non-whitespace character, `ADD_TASK` SHALL increase the list length by exactly 1, and the new task's name SHALL equal the trimmed input (truncated to 200 characters).
 
 **Validates: Requirements 2.1, 2.2**
 
 ### Property 7: Whitespace-only task names are rejected
 
-*For any* string composed entirely of whitespace characters, dispatching ADD_TASK SHALL leave the task list unchanged.
+*For any* string made only of whitespace, `ADD_TASK` SHALL leave the state unchanged.
 
 **Validates: Requirements 2.6**
 
 ### Property 8: Task deletion removes exactly one task
 
-*For any* task list containing a task with a given `id`, dispatching DELETE_TASK with that `id` SHALL decrease the list length by exactly 1 and the deleted task SHALL no longer appear in the list.
+*For any* non-empty task list and any task id in it, `DELETE_TASK` SHALL decrease the length by 1, and that id SHALL be absent.
 
 **Validates: Requirements 2.5**
 
 ### Property 9: Ghost Roast API validates request body
 
-*For any* request body where `taskName` is empty or `slackingDuration` is negative, the `/api/ghost-roast` route SHALL return HTTP 400 and a non-empty `error` string.
+*For any* body where `taskName` is missing, empty, whitespace, longer than 200 characters, or not a string, or `slackingDuration` is negative, non-finite, or not a number, or `mode` is not `roast`/`congratulate`, the route SHALL return HTTP 400 with a non-empty `error`.
 
 **Validates: Requirements 8.7, 8.8**
 
 ### Property 10: Ghost Roast API accepts valid request bodies
 
-*For any* request body where `taskName` is a non-empty string and `slackingDuration` is a non-negative finite number, the `/api/ghost-roast` route SHALL return HTTP 200 and a non-empty `message` string (using the fallback set when no API key is configured).
+*For any* valid body with no API key configured, the route SHALL return HTTP 200 with a non-empty `message` drawn from the fallback list for that mode.
 
-**Validates: Requirements 8.1, 8.3, 8.5**
+**Validates: Requirements 8.1, 8.5, 8.6**
 
 ### Property 11: Audio volume escalation stays within bounds
 
-*For any* starting volume in [0, 1] and any number of 30-second escalation steps, the resulting volume SHALL remain in [0, 1].
+*For any* starting volume in [0, 1] and any number of steps n, applying `nextVolume` n times SHALL give a value in [0, 1] that never decreases from one step to the next.
 
 **Validates: Requirements 6.2**
 
-### Property 12: Slacking-off count is monotonically non-decreasing
+### Property 12: Slacking-off count increments once per started event
 
-*For any* sequence of SLACK_START and SLACK_END actions, the `slackingOffCount` in the resulting state SHALL be greater than or equal to the count in the initial state, and SHALL increase by exactly 1 for each SLACK_END that follows a SLACK_START.
+*For any* sequence of `SLACK_START` / `SLACK_END` actions applied to a running timer, `slackingOffCount` SHALL never decrease, and SHALL equal the initial count plus the number of `SLACK_START` actions applied while `hauntMode` was false.
 
-**Validates: Requirements 4.5**
+**Validates: Requirements 4.5, 4.7**
 
-### Property 13: Survival Report displays all session data
+### Property 13: Focus duration is bounded
 
-*For any* session state, the data rendered by `SurvivalReport` SHALL include the focus duration formatted as HH:MM:SS, the full list of completed tasks, and the cumulative `slackingOffCount`.
+*For any* reachable ended state, `0 ≤ focusSeconds ≤ elapsedSeconds ≤ durationSeconds`.
+
+**Validates: Requirements 10.2, 4.9**
+
+### Property 14: Survival Report displays all session data
+
+*For any* ended state, the rendered `SurvivalReport` SHALL contain `toHHMMSS(focusSeconds)`, every name in `completedThisSession`, and `slackingOffCount`.
 
 **Validates: Requirements 10.2, 10.3, 10.4**
+
+### Property 15: Slacking is never recorded while the timer is not running
+
+*For any* state with `timerStatus !== 'running'`, `SLACK_START` SHALL leave the state unchanged.
+
+**Validates: Requirements 4.6**
 
 ---
 
@@ -395,57 +416,37 @@ interface GhostRoastError {
 
 | Failure scenario | Handling |
 |---|---|
-| `localStorage` read throws | Catch, discard key, initialise clean state, show non-blocking toast |
-| `localStorage` write throws (quota exceeded) | Catch silently; state remains in memory, toast warns user data may not persist |
-| `AudioContext` not supported | Constructor falls back to `HTMLAudioElement`; if that also fails, audio is disabled silently |
-| Notification permission denied | `NotificationService.isDenied()` returns `true`; no further requests; app continues without notifications |
-| `/api/ghost-roast` returns non-2xx or network error | `ghostRoastClient.ts` catches, returns `null`; caller renders a random `fallbackRoasts` message |
-| `/api/ghost-roast` receives invalid body | Route returns HTTP 400 with descriptive JSON error; client treats it as a fetch failure |
-| AI provider rate-limited or key absent | Same as above — fallback roast message is shown |
-| `prefers-reduced-motion: reduce` | `GhostCompanion` renders static images; `HauntOverlay` omits glitch keyframes; jumpscare is suppressed |
-| Flash frequency guard | CSS `@keyframes haunt-glitch` is authored so the full-on/full-off cycle takes ≥ 333 ms, keeping it ≤ 3 Hz |
+| `localStorage` unreadable / corrupt | Remove the key, start clean, show a non-blocking toast |
+| `localStorage` write throws (quota, private mode) | Catch; keep state in memory; show the toast once ("progress may not be saved") |
+| `AudioContext` unavailable | `AudioEngine.supported = false`; no-ops; the mute toggle shows that audio is unavailable |
+| AudioContext suspended (no gesture yet) | `unlock()` runs in the Start click handler; `start()` also tries `resume()` |
+| Notifications unsupported / denied | `permission` is `'unsupported'` or `'denied'`; `notify` does nothing; no prompt is shown again |
+| `/api/ghost-roast` non-2xx, 429, timeout, network error | `fetchRoast` returns `null`; the caller uses `getFallback(mode)` |
+| Claude refusal, empty text, or SDK error | The route returns a fallback with `source: 'fallback'` |
+| `prefers-reduced-motion` or manual toggle | CSS disables all animations; jumpscare is skipped; the glitch is replaced by a static tint |
+| Flash frequency guard | `haunt-glitch` cycle is 500 ms (2 Hz) ≤ 3 Hz |
 
 ---
 
 ## Testing Strategy
 
-### Unit tests (Jest + React Testing Library)
+**Tooling:** Jest (via `next/jest`), React Testing Library, jsdom, and fast-check (at least 100 runs per property). Route-handler tests use the `node` environment (`@jest-environment node`) and call `POST(new Request(...))` directly.
 
-- `sessionReducer`: one test per action type, covering normal paths and boundary values (e.g. TICK when `remainingSeconds === 1`).
-- `formatTime`: specific examples — `0 → "00:00"`, `3661 → "01:01:01"`.
-- `localStorageSync.read/write`: mock `localStorage`, test missing key, valid key, and schema-invalid key.
-- `ghostRoastClient`: mock `fetch`, assert that a 400 response causes the function to return `null`.
-- `fallbackRoasts`: verify the array has at least 10 entries and each is a non-empty string.
-- `AudioEngine`: mock `AudioContext` and `HTMLAudioElement`; verify `start()`, `stop()`, `setMuted()`, and `escalate()` call the right methods.
+### Unit tests
+- `sessionReducer`: each action, including the boundaries (TICK at exactly `endsAt`, a SLACK_START while already haunting, TOGGLE_TASK un-completing).
+- `formatTime`: `toMMSS(0)="00:00"`, `toMMSS(90)="01:30"`, `toHHMMSS(3661)="01:01:01"`.
+- `localStorageSync`: empty, valid, invalid JSON, wrong version, bad shape, write that throws.
+- `fallbackRoasts`: at least 10 taunts and at least 5 congratulations, all non-empty, and the picker respects the mode.
+- `ghostRoastClient`: 400, 429, or a network error each return `null`.
+- `NotificationService`: no prompt when permission is not `'default'`; at most one prompt per page load; click focuses the window.
+- `IdleDetector`: fake timers; idle after 60 s, active on input, no firing while suspended.
 
-### Property-based tests (fast-check, minimum 100 iterations each)
-
-[fast-check](https://github.com/dubzzz/fast-check) is the chosen library for TypeScript property testing.
-
-Each test below maps to a Correctness Property defined above:
-
-- **Property 1 — Timer countdown** `fc.property(fc.integer({min:60,max:7200}), fc.nat())` → apply N ticks, assert `remainingSeconds = max(0, duration - N)`. *Feature: spooky-study-buddy, Property 1: timer countdown preserves remaining time*
-- **Property 2 — Pause/resume round trip** `fc.property(runningTimerArb)` → dispatch PAUSE then RESUME, assert `remainingSeconds` unchanged. *Feature: spooky-study-buddy, Property 2: pause then resume is a time-preserving round trip*
-- **Property 3 — Reset** `fc.property(anyTimerStateArb)` → dispatch RESET, assert `remainingSeconds === durationSeconds` and status `'stopped'`. *Feature: spooky-study-buddy, Property 3: reset returns timer to initial duration*
-- **Property 4 — Persistence round trip** `fc.property(validSessionStateArb)` → serialise then deserialise, assert field equality. *Feature: spooky-study-buddy, Property 4: session state persistence round trip*
-- **Property 5 — Corrupt localStorage** `fc.property(fc.string())` → call `read()`, assert returns `null` and key removed. *Feature: spooky-study-buddy, Property 5: corrupted localStorage yields clean state*
-- **Property 6 — Task addition** `fc.property(taskListArb, nonEmptyNonWhitespaceStringArb)` → dispatch ADD_TASK, assert length+1 and name matches. *Feature: spooky-study-buddy, Property 6: task addition grows the list*
-- **Property 7 — Whitespace rejection** `fc.property(fc.stringOf(fc.constantFrom(' ', '\t', '\n')))` → dispatch ADD_TASK, assert list unchanged. *Feature: spooky-study-buddy, Property 7: whitespace-only task names are rejected*
-- **Property 8 — Task deletion** `fc.property(nonEmptyTaskListArb)` → delete a random task by id, assert length-1 and id absent. *Feature: spooky-study-buddy, Property 8: task deletion removes exactly one task*
-- **Property 9 — API rejects invalid body** `fc.property(invalidBodyArb)` → POST to route handler in-process, assert HTTP 400 + non-empty `error`. *Feature: spooky-study-buddy, Property 9: ghost roast API validates request body*
-- **Property 10 — API accepts valid body** `fc.property(validBodyArb)` → POST with API key absent (triggers fallback), assert HTTP 200 + non-empty `message`. *Feature: spooky-study-buddy, Property 10: ghost roast API accepts valid request bodies*
-- **Property 11 — Audio volume bounds** `fc.property(fc.double({min:0,max:1}), fc.nat({max:200}))` → apply N escalation steps, assert result in [0, 1]. *Feature: spooky-study-buddy, Property 11: audio volume escalation stays within bounds*
-- **Property 12 — Haunt count monotone** `fc.property(slackEventSequenceArb)` → replay action sequence, assert count non-decreasing and +1 per complete SLACK_START/END pair. *Feature: spooky-study-buddy, Property 12: slacking-off count is monotonically non-decreasing*
-- **Property 13 — Survival Report completeness** `fc.property(endedSessionStateArb)` → render `SurvivalReport`, assert HH:MM:SS duration present, all completed task names present, `slackingOffCount` present. *Feature: spooky-study-buddy, Property 13: survival report displays all session data*
+### Property-based tests
+Properties 1–15 above, each tagged `Feature: spooky-study-buddy, Property N`.
 
 ### Integration tests
+- Visibility flow: mount the app, start the timer, fire `visibilitychange` to hidden (`hauntMode` true, count = 1), then to visible (`hauntMode` false, count still 1).
+- Idle + hidden: hide the tab and advance 60 s; there is still only one slack event.
 
-- End-to-end tab-visibility flow: mount `StudyBuddyApp` in jsdom, fire `visibilitychange` to hidden, assert `hauntMode` becomes `true`, fire `visibilitychange` to visible, assert `hauntMode` becomes `false`.
-- Notification permission: mock `Notification.requestPermission`, assert it is called exactly once per mount even when called multiple times.
-- `/api/ghost-roast` integration: test with a real (or stubbed) AI provider key, assert the route returns a non-empty string.
-
-### Snapshot tests
-
-- `SurvivalReport` rendered with a fixed seed state.
-- `GhostCompanion` in each of the five `GhostState` values.
-- `HauntOverlay` in active and inactive states.
+### Manual smoke checklist (real browser)
+Audio plays after switching tabs; the title flashes; the favicon swaps; the notification arrives, and its text changes to the AI roast about 10 s in; clicking it focuses the tab; the timer finishes correctly after 5+ minutes hidden; a refresh mid-session restores the state.
