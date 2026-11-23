@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { GhostCompanion } from '@/components/ghost/GhostCompanion';
 import { RoastBubble } from '@/components/ghost/RoastBubble';
 import { HauntOverlay } from '@/components/haunt/HauntOverlay';
@@ -10,7 +10,8 @@ import { TaskList } from '@/components/tasks/TaskList';
 import { DurationPicker } from '@/components/timer/DurationPicker';
 import { TimerDisplay } from '@/components/timer/TimerDisplay';
 import { Toast } from '@/components/ui/Toast';
-import { MuteToggle, ReduceMotionToggle } from '@/components/ui/Toggles';
+import { MuteToggle, NotificationToggle, ReduceMotionToggle } from '@/components/ui/Toggles';
+import { StudyWorkspace } from '@/components/workspace/StudyWorkspace';
 import {
   useHauntEffects,
   useHauntServices,
@@ -21,10 +22,24 @@ import { useReducedMotion } from '@/lib/hooks/useReducedMotion';
 import { useSession } from '@/lib/session/SessionContext';
 import { ghostStateOf } from '@/lib/session/selectors';
 
+/** Reactively reads the current notification permission from the NotificationService. */
+function useNotificationPermission(services: ReturnType<typeof useHauntServices>) {
+  return useSyncExternalStore(
+    (cb) => {
+      // Re-read permission on every visibilitychange (user may have changed browser settings)
+      document.addEventListener('visibilitychange', cb);
+      return () => document.removeEventListener('visibilitychange', cb);
+    },
+    () => services.current?.notifications.permission ?? 'unsupported',
+    () => 'unsupported' as const,
+  );
+}
+
 export function StudyBuddyApp() {
   const { state, dispatch, hydrated, storageWarning, dismissStorageWarning } = useSession();
   const motion = useReducedMotion();
   const services = useHauntServices();
+  const notifPermission = useNotificationPermission(services);
 
   useTimerTicker(state, dispatch);
   useSlackDetection(state, dispatch, motion.reduced);
@@ -33,6 +48,11 @@ export function StudyBuddyApp() {
   const onUserGesture = useCallback(() => {
     services.current?.audio.unlock();
     void services.current?.notifications.requestPermissionIfNeeded();
+  }, [services]);
+
+  const requestNotifications = useCallback(async () => {
+    await services.current?.notifications.requestPermissionIfNeeded();
+    // Force a re-render by dispatching a no-op; useSyncExternalStore will re-read on its own
   }, [services]);
 
   if (!hydrated) {
@@ -48,12 +68,21 @@ export function StudyBuddyApp() {
 
   return (
     <>
-      <main className={`mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:py-10 ${state.hauntMode ? 'haunt-shake' : ''}`}>
+      <main
+        className={`mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:py-10 ${state.hauntMode ? 'haunt-shake' : ''}`}
+      >
+        {/* ── Header ─────────────────────────────────────────────── */}
         <header className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-display text-4xl text-ecto-400 sm:text-5xl">
-            Spooky Study Buddy <span aria-hidden>👻</span>
-          </h1>
+          <div>
+            <h1 className="font-display text-4xl text-ecto-400 sm:text-5xl drop-shadow-[0_0_16px_rgba(142,240,167,0.4)]">
+              Spooky Study Buddy <span aria-hidden>👻</span>
+            </h1>
+            <p className="mt-0.5 text-xs text-bone/50 tracking-wide">
+              Focus hard, or face the consequences.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2">
+            <NotificationToggle permission={notifPermission} onRequest={requestNotifications} />
             <MuteToggle
               muted={state.muted}
               supported={services.current?.audio.supported ?? false}
@@ -63,10 +92,18 @@ export function StudyBuddyApp() {
           </div>
         </header>
 
-        <div className="grid gap-6 md:grid-cols-[1.1fr_1fr]">
+        {/* ── Top row: ghost + timer | tasks ─────────────────────── */}
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+          {/* Ghost + Timer panel */}
           <section
             aria-label="Ghost and timer"
-            className="flex flex-col items-center gap-5 rounded-3xl border border-crypt-700 bg-crypt-900/80 p-6 shadow-xl"
+            className={`flex flex-col items-center gap-5 rounded-3xl border bg-crypt-900/80 p-6 shadow-xl transition-colors duration-500 ${
+              state.hauntMode
+                ? 'border-blood-500/50 shadow-blood-700/20'
+                : ghost === 'tense'
+                  ? 'border-pumpkin-400/40 shadow-pumpkin-400/10'
+                  : 'border-crypt-700'
+            }`}
           >
             <RoastBubble message={state.sessionEnded ? null : state.currentRoast} angry={angry} />
             <GhostCompanion state={ghost} reducedMotion={motion.reduced} />
@@ -80,12 +117,16 @@ export function StudyBuddyApp() {
             )}
           </section>
 
+          {/* Task list panel */}
           <div className="rounded-3xl border border-crypt-700 bg-crypt-900/80 p-6 shadow-xl">
             <TaskList />
           </div>
         </div>
 
-        <footer className="text-center text-xs text-bone/70">
+        {/* ── Bottom row: Session Notes + Feynman workspace ──────── */}
+        <StudyWorkspace />
+
+        <footer className="text-center text-xs text-bone/50">
           Switch tabs or go idle for 60 s while the timer runs and the ghost will come for you.
         </footer>
       </main>

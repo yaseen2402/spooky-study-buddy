@@ -25,6 +25,7 @@ export const initialState: SessionState = {
   jumpscareUntil: null,
   currentRoast: null,
   muted: false,
+  notes: '',
 };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -209,6 +210,9 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'SET_MUTED':
       return state.muted === action.muted ? state : { ...state, muted: action.muted };
 
+    case 'SET_NOTES':
+      return state.notes === action.notes ? state : { ...state, notes: action.notes };
+
     case 'RESTORE_STATE': {
       const p = action.persisted;
       const restored: SessionState = {
@@ -224,6 +228,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         slackingOffCount: p.slackingOffCount,
         totalSlackSeconds: p.totalSlackSeconds,
         muted: p.muted,
+        notes: p.notes ?? '',
       };
       // Bring a running timer up to date; finish it if the deadline passed while the page was closed.
       return sessionReducer(restored, { type: 'TICK', now: action.now });

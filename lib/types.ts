@@ -1,7 +1,28 @@
 export type TimerStatus = 'stopped' | 'running' | 'paused';
-export type GhostState = 'idle' | 'calm' | 'haunting' | 'jumpscare' | 'celebratory';
+export type GhostState = 'idle' | 'calm' | 'tense' | 'haunting' | 'jumpscare' | 'celebratory';
 export type SlackSource = 'visibility' | 'idle';
 export type RoastMode = 'roast' | 'congratulate';
+
+/** Feynman-mode AI request (separate from roast so it carries the student's explanation text). */
+export interface FeynmanRequest {
+  topicName: string;
+  explanation: string;
+}
+
+export interface FeynmanResponse {
+  feedback: string;
+  /** Highlights: what was clear in the explanation. */
+  clear: string;
+  /** Gaps: what was missing or could be clearer. */
+  missing: string;
+  /** A one-sentence simplification prompt. */
+  simplifyPrompt: string;
+  source: 'ai' | 'fallback';
+}
+
+export interface FeynmanError {
+  error: string;
+}
 
 export const MIN_DURATION_SECONDS = 60;
 export const MAX_DURATION_SECONDS = 7200;
@@ -41,6 +62,9 @@ export interface SessionState {
   jumpscareUntil: number | null;
   currentRoast: string | null;
   muted: boolean;
+
+  // Session Notes scratchpad (persisted per session key in localStorage separately)
+  notes: string;
 }
 
 export interface PersistedSessionState {
@@ -56,6 +80,7 @@ export interface PersistedSessionState {
   slackingOffCount: number;
   totalSlackSeconds: number;
   muted: boolean;
+  notes: string;
 }
 
 export type SessionAction =
@@ -75,6 +100,7 @@ export type SessionAction =
   | { type: 'CLEAR_JUMPSCARE' }
   | { type: 'SET_ROAST'; message: string | null }
   | { type: 'SET_MUTED'; muted: boolean }
+  | { type: 'SET_NOTES'; notes: string }
   | { type: 'RESTORE_STATE'; persisted: PersistedSessionState; now: number };
 
 export interface GhostRoastRequest {

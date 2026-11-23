@@ -21,6 +21,9 @@ export function ghostStateOf(s: SessionState, now: number): GhostState {
   if (s.sessionEnded) return 'celebratory';
   if (s.hauntMode) return 'haunting';
   if (s.jumpscareUntil !== null && s.jumpscareUntil > now) return 'jumpscare';
-  if (s.timerStatus === 'running') return 'calm';
+  if (s.timerStatus === 'running') {
+    // Last 5 minutes of a session: ghost gets tense
+    return s.remainingSeconds <= 300 && s.durationSeconds > 300 ? 'tense' : 'calm';
+  }
   return 'idle';
 }

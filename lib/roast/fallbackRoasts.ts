@@ -1,4 +1,4 @@
-import type { RoastMode } from '@/lib/types';
+import type { FeynmanResponse, RoastMode } from '@/lib/types';
 
 export const TAUNTS: readonly string[] = [
   "I've haunted this house for 300 years and never seen anyone dodge work this skillfully.",
@@ -24,7 +24,34 @@ export const CONGRATULATIONS: readonly string[] = [
   'Not bad for a living person. I may have to haunt someone lazier.',
 ];
 
+type FallbackFeynman = Omit<FeynmanResponse, 'source'>;
+
+const FEYNMAN_FALLBACKS: readonly FallbackFeynman[] = [
+  {
+    feedback: "Ooooh, a brave attempt to explain to the Ghost Mentor! The spectral archives are impressed you tried.",
+    clear: "Your explanation shows some genuine grasp of the core idea — the ghost can sense the effort.",
+    missing: "A concrete example or analogy would make this hauntingly clear. The spirit world demands specifics.",
+    simplifyPrompt: "Now explain it as if the ghost is a confused medieval peasant who has never seen electricity.",
+  },
+  {
+    feedback: "The Ghost Mentor has floated through centuries of explanations, and yours shows real promise.",
+    clear: "You've captured the essential skeleton of the concept — the bones are in the right place.",
+    missing: "Consider: what would happen if one piece were missing? Naming that would sharpen your understanding.",
+    simplifyPrompt: "Try explaining it again in exactly three sentences — no more, no less.",
+  },
+  {
+    feedback: "Interesting… the crypt walls are etched with more complicated explanations than yours, and that is a compliment.",
+    clear: "The opening of your explanation demonstrates solid command of the fundamentals.",
+    missing: "What connects your ideas together? The ghost senses a missing chain link haunting the middle.",
+    simplifyPrompt: "Imagine you must explain this to a friendly ghost who can only understand words of two syllables or fewer.",
+  },
+];
+
 export function getFallback(mode: RoastMode, random: () => number = Math.random): string {
   const list = mode === 'congratulate' ? CONGRATULATIONS : TAUNTS;
   return list[Math.min(list.length - 1, Math.floor(random() * list.length))];
+}
+
+export function getFallbackFeynman(random: () => number = Math.random): FallbackFeynman {
+  return FEYNMAN_FALLBACKS[Math.min(FEYNMAN_FALLBACKS.length - 1, Math.floor(random() * FEYNMAN_FALLBACKS.length))];
 }

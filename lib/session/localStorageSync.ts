@@ -28,6 +28,7 @@ export function toPersisted(s: SessionState): PersistedSessionState {
     slackingOffCount: s.slackingOffCount,
     totalSlackSeconds: s.totalSlackSeconds,
     muted: s.muted,
+    notes: s.notes,
   };
 }
 
@@ -68,6 +69,7 @@ export function isValidPersistedState(v: unknown): v is PersistedSessionState {
   if (new Set(v.tasks.map((t) => (t as Task).id)).size !== v.tasks.length) return false;
   if (!isNonNegInt(v.slackingOffCount) || !isNonNegInt(v.totalSlackSeconds)) return false;
   if (typeof v.muted !== 'boolean') return false;
+  if (typeof v.notes !== 'string' && v.notes !== undefined) return false;
   return true;
 }
 
