@@ -6,29 +6,29 @@ import { TaskItem } from './TaskItem';
 
 export function TaskList() {
   const { state } = useSession();
+  const total = state.tasks.length;
   const done = state.tasks.filter((t) => t.completed).length;
+  const watchedId = state.tasks.find((t) => !t.completed)?.id;
 
   return (
-    <section aria-labelledby="tasks-heading" className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between">
-        <h2 id="tasks-heading" className="font-display text-2xl text-pumpkin-400">
-          Tasks to haunt
+    <section className="tasks-section" aria-labelledby="tasks-heading">
+      <div className="section-header">
+        <h2 id="tasks-heading" className="section-title">
+          Tasks
         </h2>
-        {state.tasks.length > 0 && (
-          <span className="text-sm text-bone/80">
-            {done}/{state.tasks.length} done
-          </span>
-        )}
+        <span className="section-meta">
+          {done}/{total}
+        </span>
       </div>
+
       <TaskInput />
-      {state.tasks.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-crypt-600 px-3 py-6 text-center text-sm text-bone/70">
-          No tasks yet. The ghost gets bored without a target.
-        </p>
+
+      {total === 0 ? (
+        <p className="tasks-empty">Nothing to haunt yet.</p>
       ) : (
-        <ol className="flex flex-col gap-2">
+        <ol className="task-list">
           {state.tasks.map((t) => (
-            <TaskItem key={t.id} task={t} />
+            <TaskItem key={t.id} task={t} watched={t.id === watchedId} />
           ))}
         </ol>
       )}

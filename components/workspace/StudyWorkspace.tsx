@@ -1,98 +1,61 @@
 'use client';
 
-import { useState } from 'react';
-import { SessionNotes } from './SessionNotes';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { FeynmanMode } from './FeynmanMode';
-import { useSession } from '@/lib/session/SessionContext';
+import { SessionNotes } from './SessionNotes';
 
 type Tab = 'notes' | 'feynman';
+const ORDER: Tab[] = ['notes', 'feynman'];
+const LABEL: Record<Tab, string> = { notes: 'Notes', feynman: 'Explain to Ghost' };
 
 export function StudyWorkspace() {
   const [activeTab, setActiveTab] = useState<Tab>('notes');
-  const { state } = useSession();
-  const hasNotes = state.notes.trim().length > 0;
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ notes: null, feynman: null });
+
+  // WAI-ARIA tabs: arrow keys / Home / End move between tabs.
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const i = ORDER.indexOf(activeTab);
+    let next: Tab | null = null;
+    if (e.key === 'ArrowRight') next = ORDER[(i + 1) % ORDER.length];
+    if (e.key === 'ArrowLeft') next = ORDER[(i - 1 + ORDER.length) % ORDER.length];
+    if (e.key === 'Home') next = ORDER[0];
+    if (e.key === 'End') next = ORDER[ORDER.length - 1];
+    if (next) {
+      e.preventDefault();
+      setActiveTab(next);
+      tabRefs.current[next]?.focus();
+    }
+  }
 
   return (
-    <section
-      aria-labelledby="workspace-heading"
-      className="flex flex-col rounded-3xl border border-crypt-700 bg-crypt-900/80 shadow-xl overflow-hidden"
-    >
-      {/* Tab bar */}
-      <div className="flex border-b border-crypt-700" role="tablist" aria-label="Study workspace">
-        <TabButton
-          id="tab-notes"
-          panelId="panel-notes"
-          active={activeTab === 'notes'}
-          onClick={() => setActiveTab('notes')}
-        >
-          <span aria-hidden>📝</span>
-          Session Notes
-          {hasNotes && (
-            <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-ecto-400" aria-label="has notes" />
-          )}
-        </TabButton>
-        <TabButton
-          id="tab-feynman"
-          panelId="panel-feynman"
-          active={activeTab === 'feynman'}
-          onClick={() => setActiveTab('feynman')}
-        >
-          <span aria-hidden>👻</span>
-          Explain to the Ghost
-        </TabButton>
+    <section className="study-workspace" aria-label="Study workspace">
+      <div className="workspace-tabs" role="tablist" aria-label="Study workspace" onKeyDown={onKeyDown}>
+        {ORDER.map((tab) => (
+          <button
+            key={tab}
+            ref={(el) => {
+              tabRefs.current[tab] = el;
+            }}
+            id={`tab-${tab}`}
+            type="button"
+            role="tab"
+            className="tab-btn"
+            aria-selected={activeTab === tab}
+            aria-controls={`panel-${tab}`}
+            tabIndex={activeTab === tab ? 0 : -1}
+            onClick={() => setActiveTab(tab)}
+          >
+            {LABEL[tab]}
+          </button>
+        ))}
       </div>
 
-      {/* Panels */}
-      <div
-        id="panel-notes"
-        role="tabpanel"
-        aria-labelledby="tab-notes"
-        hidden={activeTab !== 'notes'}
-        className="flex-1"
-      >
+      <div id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" className="tab-panel" hidden={activeTab !== 'notes'}>
         <SessionNotes />
       </div>
-      <div
-        id="panel-feynman"
-        role="tabpanel"
-        aria-labelledby="tab-feynman"
-        hidden={activeTab !== 'feynman'}
-        className="flex-1"
-      >
+      <div id="panel-feynman" role="tabpanel" aria-labelledby="tab-feynman" className="tab-panel" hidden={activeTab !== 'feynman'}>
         <FeynmanMode />
       </div>
     </section>
-  );
-}
-
-function TabButton({
-  id,
-  panelId,
-  active,
-  onClick,
-  children,
-}: {
-  id: string;
-  panelId: string;
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      id={id}
-      type="button"
-      role="tab"
-      aria-selected={active}
-      aria-controls={panelId}
-      onClick={onClick}
-      className={`flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ecto-400 ${
-        active
-          ? 'border-b-2 border-ecto-400 text-ecto-300'
-          : 'text-bone/60 hover:text-bone/90'
-      }`}
-    >
-      {children}
-    </button>
   );
 }

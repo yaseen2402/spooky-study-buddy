@@ -29,37 +29,35 @@ export function TaskInput() {
   };
 
   return (
-    <form onSubmit={submit} noValidate className="space-y-1">
-      <label htmlFor={inputId} className="sr-only">
-        New task
-      </label>
-      <div className="flex gap-2">
+    <div>
+      <form onSubmit={submit} noValidate className="task-form">
+        <label htmlFor={inputId} className="sr-only">
+          New task
+        </label>
         <input
           id={inputId}
           type="text"
+          className="task-input"
           value={value}
           maxLength={MAX_TASK_NAME_LENGTH}
+          autoComplete="off"
           onChange={(e) => {
             setValue(e.target.value);
             if (error) setError(null);
           }}
-          placeholder="e.g. Chapter 4: Organic chemistry"
+          placeholder="Add a study task..."
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
-          className="min-w-0 flex-1 rounded-lg border border-crypt-600 bg-crypt-900 px-3 py-2 text-bone placeholder:text-bone/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ecto-400"
         />
-        <button
-          type="submit"
-          className="rounded-lg bg-pumpkin-400 px-4 py-2 font-semibold text-crypt-950 hover:bg-pumpkin-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ecto-400"
-        >
+        <button type="submit" className="btn-add-task">
           Add
         </button>
-      </div>
+      </form>
       {error && (
-        <p id={errorId} role="alert" className="text-sm text-blood-400">
+        <p id={errorId} role="alert" className="form-error mt-1.5">
           {error}
         </p>
       )}
-    </form>
+    </div>
   );
 }

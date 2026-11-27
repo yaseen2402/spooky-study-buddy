@@ -1,20 +1,28 @@
 import type { Config } from 'tailwindcss';
 
+/** Tokens from the "late-night printshop" design (spooky_study_buddy.html). */
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        crypt: { 950: '#0b0a10', 900: '#13111c', 800: '#1d1a2a', 700: '#2a2640', 600: '#3b3558' },
-        ecto: { 300: '#b9f5c8', 400: '#8ef0a7', 500: '#5fdc83' },
-        blood: { 400: '#ff6b6b', 500: '#e5383b', 700: '#a4161a' },
-        pumpkin: { 400: '#ffa94d', 500: '#ff8c1a' },
-        bone: '#ece6d9',
+        ink: '#121110',
+        surface: { DEFAULT: '#1A1816', hover: '#221F1C' },
+        rule: { DEFAULT: '#2E2B27', strong: '#4A453E' },
+        bone: '#EDE6D6',
+        muted: '#999184',
+        dim: '#6E685F',
+        amber: '#E5A93C',
+        ember: '#E06D32',
+        vermilion: { DEFAULT: '#E03C31', text: '#FF6B61' },
+        sage: '#8FB38A',
       },
       fontFamily: {
-        display: ['var(--font-display)', 'serif'],
-        body: ['var(--font-body)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'Georgia', 'serif'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
+      borderRadius: { sharp: '3px' },
     },
   },
   plugins: [],
